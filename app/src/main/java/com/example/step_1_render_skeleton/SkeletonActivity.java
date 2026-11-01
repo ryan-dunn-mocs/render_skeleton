@@ -6,7 +6,6 @@ import android.opengl.GLES20;
 import android.opengl.Matrix;
 import android.os.Bundle;
 import android.view.MotionEvent;
-import android.view.View;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -15,34 +14,109 @@ import java.nio.FloatBuffer;
 import javax.microedition.khronos.egl.EGLConfig;
 import javax.microedition.khronos.opengles.GL10;
 
+import android.os.Handler;
+import android.os.Looper;
+
 public class SkeletonActivity extends Activity {
 
     private GLSurfaceView glView;
+    private SkeletonGLView skeletonView;
+
+    private Handler animationHandler =
+            new Handler(Looper.getMainLooper());
+
+    private boolean animationRunning = false;
+
+    private float animationTime = 0.0f;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
-        glView = new SkeletonGLView(this);
+        skeletonView = new SkeletonGLView(this);
+        glView = skeletonView;
 
         setContentView(glView);
+
+        animationRunning = true;
+
+        animationHandler.post(animationRunnable);
     }
+
+    public void updateSkeleton(float[][] newPositions) {
+        if (skeletonView != null) {
+            skeletonView.updateSkeleton(newPositions);
+        }
+    }
+
+    private void testSkeletonMovement() {
+
+        float[][] positions = {
+                {0.0f, 2.2f, 0.0f},
+                {0.0f, 1.7f, 0.0f},
+                {0.0f, 1.0f, 0.0f},
+                {0.0f, 0.0f, 0.0f},
+                {-0.9f, 1.2f, 0.0f},
+                {-1.5f, 0.5f, 0.0f},
+                {0.9f, 1.2f, 0.0f},
+                {1.5f, 0.5f, 0.0f},
+                {-0.5f, -1.2f, 0.0f},
+                {0.5f, -1.2f, 0.0f}
+        };
+
+        updateSkeleton(positions);
+    }
+
+    private final Runnable animationRunnable = new Runnable() {
+
+        @Override
+        public void run() {
+
+            if (!animationRunning) {
+                return;
+            }
+
+            animationTime += 0.08f;
+
+            float swing = (float) Math.sin(animationTime);
+
+            float legSwing = swing * 0.5f;
+            float armSwing = swing * 0.4f;
+
+            float[][] positions = {
+
+                    {0.0f, 2.2f, 0.0f},  // Head
+                    {0.0f, 1.7f, 0.0f},  // Neck
+                    {0.0f, 1.0f, 0.0f},  // Chest
+                    {0.0f, 0.0f, 0.0f},  // Pelvis
+
+                    {-0.9f, 1.2f, 0.0f},  // Left shoulder
+                    {-1.5f, 0.5f + armSwing, 0.0f}, // Left hand
+
+                    {0.9f, 1.2f, 0.0f},   // Right shoulder
+                    {1.5f, 0.5f - armSwing, 0.0f}, // Right hand
+
+                    {-0.5f, -1.2f + legSwing, 0.0f}, // Left foot
+                    {0.5f, -1.2f - legSwing, 0.0f}   // Right foot
+            };
+
+            updateSkeleton(positions);
+
+            animationHandler.postDelayed(this, 33);
+        }
+    };
 
     @Override
     protected void onPause() {
         super.onPause();
-        glView.onPause();
+        if (glView != null) glView.onPause();
     }
 
     @Override
     protected void onResume() {
         super.onResume();
-        glView.onResume();
+        if (glView != null) glView.onResume();
     }
-
-    // ------------------------------------------------
-    // OPENGL VIEW
-    // ------------------------------------------------
 
     private static class SkeletonGLView extends GLSurfaceView {
 
@@ -65,6 +139,48 @@ public class SkeletonActivity extends Activity {
             );
         }
 
+        public void updateSkeleton(final float[][] positions) {
+
+            if (positions == null || positions.length != 10) {
+                throw new IllegalArgumentException(
+                        "Skeleton must contain exactly 10 joints."
+                );
+            }
+
+            final float[][] copy = new float[10][3];
+
+            for (int i = 0; i < 10; i++) {
+
+                if (positions[i] == null ||
+                        positions[i].length != 3) {
+                    throw new IllegalArgumentException(
+                            "Each joint needs X, Y and Z."
+                    );
+                }
+
+                for (int j = 0; j < 3; j++) {
+
+                    float value = positions[i][j];
+
+                    if (Float.isNaN(value) ||
+                            Float.isInfinite(value)) {
+                        throw new IllegalArgumentException(
+                                "Coordinates must be finite."
+                        );
+                    }
+
+                    copy[i][j] = value;
+                }
+            }
+
+            queueEvent(new Runnable() {
+                @Override
+                public void run() {
+                    renderer.updateSkeleton(copy);
+                }
+            });
+        }
+
         @Override
         public boolean onTouchEvent(MotionEvent event) {
 
@@ -74,31 +190,34 @@ public class SkeletonActivity extends Activity {
             switch (event.getAction()) {
 
                 case MotionEvent.ACTION_DOWN:
-
                     previousX = x;
                     previousY = y;
                     return true;
 
                 case MotionEvent.ACTION_MOVE:
 
-                    float dx = x - previousX;
-                    float dy = y - previousY;
-
-                    renderer.rotate(dx, dy);
+                    final float dx = x - previousX;
+                    final float dy = y - previousY;
 
                     previousX = x;
                     previousY = y;
 
+                    queueEvent(new Runnable() {
+                        @Override
+                        public void run() {
+                            renderer.rotate(dx, dy);
+                        }
+                    });
+
+                    return true;
+
+                case MotionEvent.ACTION_UP:
                     return true;
             }
 
             return true;
         }
     }
-
-    // ------------------------------------------------
-    // SKELETON RENDERER
-    // ------------------------------------------------
 
     private static class SkeletonRenderer
             implements GLSurfaceView.Renderer {
@@ -113,47 +232,30 @@ public class SkeletonActivity extends Activity {
         private FloatBuffer jointBuffer;
         private FloatBuffer boneBuffer;
 
-        private final float[] projectionMatrix =
-                new float[16];
-
-        private final float[] viewMatrix =
-                new float[16];
-
-        private final float[] modelMatrix =
-                new float[16];
-
-        private final float[] mvpMatrix =
-                new float[16];
+        private final float[] projectionMatrix = new float[16];
+        private final float[] viewMatrix = new float[16];
+        private final float[] modelMatrix = new float[16];
+        private final float[] mvpMatrix = new float[16];
 
         private float rotationX = 0;
         private float rotationY = 0;
 
-        // --------------------------------------------
-        // JOINT POSITIONS
-        // Each row contains X, Y, Z.
-        // --------------------------------------------
-
         private final float[][] joints = {
 
-                { 0.0f,  2.0f, 0.0f }, // 0 Head
-                { 0.0f,  1.6f, 0.0f }, // 1 Neck
-                { 0.0f,  0.9f, 0.0f }, // 2 Chest
-                { 0.0f,  0.0f, 0.0f }, // 3 Pelvis
+                {0.0f, 2.0f, 0.0f},
+                {0.0f, 1.6f, 0.0f},
+                {0.0f, 0.9f, 0.0f},
+                {0.0f, 0.0f, 0.0f},
 
-                {-0.7f,  1.1f, 0.0f }, // 4 Left shoulder
-                {-1.2f,  0.3f, 0.0f }, // 5 Left hand
+                {-0.7f, 1.1f, 0.0f},
+                {-1.2f, 0.3f, 0.0f},
 
-                { 0.7f,  1.1f, 0.0f }, // 6 Right shoulder
-                { 1.2f,  0.3f, 0.0f }, // 7 Right hand
+                {0.7f, 1.1f, 0.0f},
+                {1.2f, 0.3f, 0.0f},
 
-                {-0.4f, -1.0f, 0.0f }, // 8 Left foot
-                { 0.4f, -1.0f, 0.0f }  // 9 Right foot
+                {-0.4f, -1.0f, 0.0f},
+                {0.4f, -1.0f, 0.0f}
         };
-
-        // --------------------------------------------
-        // BONE CONNECTIONS
-        // Each pair references two joint IDs.
-        // --------------------------------------------
 
         private final int[][] bones = {
 
@@ -171,29 +273,21 @@ public class SkeletonActivity extends Activity {
                 {3, 9}
         };
 
-        // --------------------------------------------
-        // SHADERS
-        // --------------------------------------------
-
         private final String vertexShader =
                 "uniform mat4 uMVPMatrix;" +
                         "uniform float uPointSize;" +
                         "attribute vec4 aPosition;" +
                         "void main() {" +
-                        " gl_Position = uMVPMatrix * aPosition;" +
-                        " gl_PointSize = uPointSize;" +
+                        "gl_Position = uMVPMatrix * aPosition;" +
+                        "gl_PointSize = uPointSize;" +
                         "}";
 
         private final String fragmentShader =
                 "precision mediump float;" +
                         "uniform vec4 uColor;" +
                         "void main() {" +
-                        " gl_FragColor = uColor;" +
+                        "gl_FragColor = uColor;" +
                         "}";
-
-        // --------------------------------------------
-        // INITIALIZATION
-        // --------------------------------------------
 
         @Override
         public void onSurfaceCreated(
@@ -203,9 +297,7 @@ public class SkeletonActivity extends Activity {
                     0.06f, 0.07f, 0.10f, 1.0f
             );
 
-            GLES20.glEnable(
-                    GLES20.GL_DEPTH_TEST
-            );
+            GLES20.glEnable(GLES20.GL_DEPTH_TEST);
 
             program = createProgram(
                     vertexShader,
@@ -243,10 +335,50 @@ public class SkeletonActivity extends Activity {
             );
         }
 
-        // --------------------------------------------
-        // CREATE VERTEX BUFFERS
-        // --------------------------------------------
+        public void updateSkeleton(float[][] newPositions) {
 
+            for (int i = 0; i < 10; i++) {
+                System.arraycopy(
+                        newPositions[i],
+                        0,
+                        joints[i],
+                        0,
+                        3
+                );
+            }
+
+            // Buffers may not exist during startup.
+            if (jointBuffer == null || boneBuffer == null) {
+                return;
+            }
+
+            updateBuffers();
+        }
+
+        private void updateBuffers() {
+
+            if (jointBuffer == null || boneBuffer == null) {
+                return;
+            }
+
+            jointBuffer.position(0);
+
+            for (int i = 0; i < 10; i++) {
+                jointBuffer.put(joints[i]);
+            }
+
+            jointBuffer.position(0);
+
+            boneBuffer.position(0);
+
+            for (int[] bone : bones) {
+                for (int jointID : bone) {
+                    boneBuffer.put(joints[jointID]);
+                }
+            }
+
+            boneBuffer.position(0);
+        }
         private void createBuffers() {
 
             float[] boneVertices =
@@ -255,20 +387,15 @@ public class SkeletonActivity extends Activity {
             int index = 0;
 
             for (int[] bone : bones) {
-
                 for (int jointID : bone) {
-
                     for (int axis = 0; axis < 3; axis++) {
-
                         boneVertices[index++] =
                                 joints[jointID][axis];
                     }
                 }
             }
 
-            boneBuffer = createFloatBuffer(
-                    boneVertices
-            );
+            boneBuffer = createFloatBuffer(boneVertices);
 
             float[] jointVertices =
                     new float[joints.length * 3];
@@ -276,21 +403,15 @@ public class SkeletonActivity extends Activity {
             index = 0;
 
             for (float[] joint : joints) {
-
                 for (float coordinate : joint) {
-
-                    jointVertices[index++] =
-                            coordinate;
+                    jointVertices[index++] = coordinate;
                 }
             }
 
-            jointBuffer = createFloatBuffer(
-                    jointVertices
-            );
+            jointBuffer = createFloatBuffer(jointVertices);
         }
 
-        private FloatBuffer createFloatBuffer(
-                float[] values) {
+        private FloatBuffer createFloatBuffer(float[] values) {
 
             ByteBuffer bb = ByteBuffer.allocateDirect(
                     values.length * 4
@@ -301,26 +422,20 @@ public class SkeletonActivity extends Activity {
             FloatBuffer buffer = bb.asFloatBuffer();
 
             buffer.put(values);
-
             buffer.position(0);
 
             return buffer;
         }
 
-        // --------------------------------------------
-        // SCREEN SIZE / CAMERA PROJECTION
-        // --------------------------------------------
-
         @Override
         public void onSurfaceChanged(
                 GL10 gl, int width, int height) {
 
-            GLES20.glViewport(
-                    0, 0, width, height
-            );
+            GLES20.glViewport(0, 0, width, height);
 
-            float ratio =
-                    (float) width / (float) height;
+            if (width <= 0 || height <= 0) return;
+
+            float ratio = (float) width / (float) height;
 
             Matrix.frustumM(
                     projectionMatrix,
@@ -334,10 +449,6 @@ public class SkeletonActivity extends Activity {
             );
         }
 
-        // --------------------------------------------
-        // DRAW FRAME
-        // --------------------------------------------
-
         @Override
         public void onDrawFrame(GL10 gl) {
 
@@ -346,29 +457,25 @@ public class SkeletonActivity extends Activity {
                             GLES20.GL_DEPTH_BUFFER_BIT
             );
 
+            if (program == 0 ||
+                    jointBuffer == null ||
+                    boneBuffer == null) {
+                return;
+            }
+
             GLES20.glUseProgram(program);
 
-            // Model rotation
+            Matrix.setIdentityM(modelMatrix, 0);
 
-            Matrix.setIdentityM(
-                    modelMatrix, 0
+            Matrix.rotateM(
+                    modelMatrix, 0,
+                    rotationX, 1, 0, 0
             );
 
             Matrix.rotateM(
-                    modelMatrix,
-                    0,
-                    rotationX,
-                    1, 0, 0
+                    modelMatrix, 0,
+                    rotationY, 0, 1, 0
             );
-
-            Matrix.rotateM(
-                    modelMatrix,
-                    0,
-                    rotationY,
-                    0, 1, 0
-            );
-
-            // Combine camera and model matrices
 
             float[] temp = new float[16];
 
@@ -392,7 +499,11 @@ public class SkeletonActivity extends Activity {
                     0
             );
 
-            // Draw bones
+            GLES20.glEnableVertexAttribArray(
+                    positionHandle
+            );
+
+            // Draw bones.
 
             GLES20.glUniform4f(
                     colorHandle,
@@ -404,10 +515,6 @@ public class SkeletonActivity extends Activity {
             );
 
             GLES20.glLineWidth(2.0f);
-
-            GLES20.glEnableVertexAttribArray(
-                    positionHandle
-            );
 
             GLES20.glVertexAttribPointer(
                     positionHandle,
@@ -424,7 +531,7 @@ public class SkeletonActivity extends Activity {
                     bones.length * 2
             );
 
-            // Draw joints
+            // Draw joints.
 
             GLES20.glUniform4f(
                     colorHandle,
@@ -454,20 +561,11 @@ public class SkeletonActivity extends Activity {
                     positionHandle
             );
         }
-
-        // --------------------------------------------
-        // CAMERA ROTATION
-        // --------------------------------------------
-
         public void rotate(float dx, float dy) {
 
             rotationY += dx * 0.5f;
             rotationX += dy * 0.5f;
         }
-
-        // --------------------------------------------
-        // SHADER PROGRAM CREATION
-        // --------------------------------------------
 
         private int createProgram(
                 String vertexSource,
@@ -486,7 +584,6 @@ public class SkeletonActivity extends Activity {
             int program = GLES20.glCreateProgram();
 
             GLES20.glAttachShader(program, vertex);
-
             GLES20.glAttachShader(program, fragment);
 
             GLES20.glLinkProgram(program);
@@ -506,6 +603,8 @@ public class SkeletonActivity extends Activity {
                         GLES20.glGetProgramInfoLog(program);
 
                 GLES20.glDeleteProgram(program);
+                GLES20.glDeleteShader(vertex);
+                GLES20.glDeleteShader(fragment);
 
                 throw new RuntimeException(
                         "Program linking failed: " + error
@@ -518,9 +617,7 @@ public class SkeletonActivity extends Activity {
             return program;
         }
 
-        private int loadShader(
-                int type,
-                String source) {
+        private int loadShader(int type, String source) {
 
             int shader = GLES20.glCreateShader(type);
 
