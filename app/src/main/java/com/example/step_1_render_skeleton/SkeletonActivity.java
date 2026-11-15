@@ -49,24 +49,6 @@ public class SkeletonActivity extends Activity {
         }
     }
 
-    private void testSkeletonMovement() {
-
-        float[][] positions = {
-                {0.0f, 2.2f, 0.0f},
-                {0.0f, 1.7f, 0.0f},
-                {0.0f, 1.0f, 0.0f},
-                {0.0f, 0.0f, 0.0f},
-                {-0.9f, 1.2f, 0.0f},
-                {-1.5f, 0.5f, 0.0f},
-                {0.9f, 1.2f, 0.0f},
-                {1.5f, 0.5f, 0.0f},
-                {-0.5f, -1.2f, 0.0f},
-                {0.5f, -1.2f, 0.0f}
-        };
-
-        updateSkeleton(positions);
-    }
-
     private final Runnable animationRunnable = new Runnable() {
 
         @Override
